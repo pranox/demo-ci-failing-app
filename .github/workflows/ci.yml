@@ -1,0 +1,50 @@
+name: Demo CI Failure
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run failing step and capture error
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $err = ""
+
+          try {
+            python -c "import app"
+          } catch {
+            $err = $_ | Out-String
+          }
+
+          if ($err -eq "") {
+            $err = "CI failed but no error captured"
+          }
+
+          $err | Out-File ci_error.txt -Encoding utf8
+
+      - name: Send failure to analyzer
+        shell: powershell
+        run: |
+          $log = Get-Content ci_error.txt -Raw
+
+          $payload = @{
+            incident_id = "${{ github.run_id }}"
+            log_text    = $log
+          }
+
+          Invoke-RestMethod `
+            -Uri http://localhost:8000/webhook/ci `
+            -Method POST `
+            -ContentType "application/json" `
+            -Body ($payload | ConvertTo-Json -Depth 5)
+
+      - name: Mark job failed
+        shell: powershell
+        run: exit 1
